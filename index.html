@@ -89,9 +89,10 @@
   .names .row span { padding-right: .25em; }
   .names .row span i { font-style: normal; color: var(--acc-ink); padding-left: .25em; }
   .names .row.two span { font-style: italic; }
-  .portrait { position: absolute; z-index: 2; overflow: hidden; will-change: left, top, width, height; background: #333; }
-  .portrait img { width: 100%; height: 100%; object-fit: cover; object-position: 44% 30%; }
-  .portrait::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.28) 0%, transparent 22%, transparent 68%, rgba(0,0,0,.45) 100%); opacity: var(--shade, 1); pointer-events: none; }
+  .portrait { position: absolute; inset: 0; z-index: 2; overflow: hidden; contain: strict; will-change: clip-path; }
+  .portrait img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; object-position: 44% 30%; transform-origin: 0 0; will-change: transform; backface-visibility: hidden; }
+  .pshadow { position: absolute; z-index: 2; border-radius: 22px; box-shadow: 0 40px 90px -40px rgba(0,0,0,.75); opacity: 0; pointer-events: none; will-change: transform, opacity; transform-origin: 50% 50%; }
+  .portrait .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.28) 0%, transparent 22%, transparent 68%, rgba(0,0,0,.45) 100%); pointer-events: none; will-change: opacity; }
   .sig { position: absolute; z-index: 4; pointer-events: none; overflow: visible; }
   .sig text { font-family: var(--script); fill: transparent; stroke: #5fa77a; stroke-width: 1.4; paint-order: stroke; }
   .stickers { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
@@ -394,11 +395,13 @@
         <div class="row two" id="row2"></div>
       </div>
 
+      <div class="pshadow" id="pshadow" aria-hidden="true"></div>
       <div class="portrait" id="portrait">
         <picture>
           <source media="(max-aspect-ratio: 4/5)" srcset="assets/hero-tall.webp">
           <img src="assets/hero-wide.webp" alt="Portrait of Junaid Ahmad" width="1200" height="750">
         </picture>
+          <div class="shade" id="pshade"></div>
       </div>
 
       <svg class="sig" id="sig" viewBox="0 0 600 220" aria-hidden="true">
@@ -825,27 +828,60 @@
   }
 
   var drift = 0, last = performance.now(), vw = innerWidth, vh = innerHeight;
-  function frame(now) {
-    var dt = Math.min(64, now - last); last = now;
-    if (!reduce) drift += dt * 0.018;
-    var total = home.offsetHeight - vh;
-    var y = window.scrollY;
-    var p = reduce ? 1 : clamp(y / Math.max(1, total), 0, 1);
-
-    // portrait: full bleed -> centred card
-    var k = smooth(p, 0.04, 0.5);
+  var pimg = portrait.querySelector("img"), pshadow = document.getElementById("pshadow"), pshade = document.getElementById("pshade");
+  var total = 1, docH = 1, ps = -1, lastY = -1, lastK = -1, G = null;
+  function measure() {
+    total = Math.max(1, home.offsetHeight - vh);
+    docH = Math.max(1, document.documentElement.scrollHeight - vh);
     var cw = vw > vh ? Math.min(vw * 0.3, 420) : vw * 0.7;
     var ch = vw > vh ? Math.min(vh * 0.62, 560) : vh * 0.52;
-    var w = lerp(vw, cw, k), h = lerp(vh, ch, k);
-    var x = (vw - w) / 2, top = lerp(0, (vh - h) / 2 + vh * 0.02, k);
-    portrait.style.left = x + "px"; portrait.style.top = top + "px";
-    portrait.style.width = w + "px"; portrait.style.height = h + "px";
-    portrait.style.borderRadius = lerp(0, 22, k) + "px";
-    portrait.style.boxShadow = k > 0.05 ? "0 40px 90px -40px rgba(0,0,0," + (0.75 * k).toFixed(2) + ")" : "none";
-    portrait.style.setProperty("--shade", (1 - k * 0.8).toFixed(2));
+    var cx = (vw - cw) / 2, cy = (vh - ch) / 2 + vh * 0.02;
+    var iw = pimg.naturalWidth || (vw / vh > 0.8 ? 1200 : 700), ih = pimg.naturalHeight || (vw / vh > 0.8 ? 750 : 1000);
+    // full-bleed cover of the stage, and cover of the final card, both at object-position 44% 30%
+    var f = Math.max(vw / iw, vh / ih), Fw = iw * f, Fh = ih * f;
+    var ox0 = (vw - Fw) * 0.44, oy0 = (vh - Fh) * 0.30;
+    var c = Math.max(cw / iw, ch / ih), sEnd = c / f;
+    var tx = cx + (cw - Fw * sEnd) * 0.44 - ox0 * sEnd, ty = cy + (ch - Fh * sEnd) * 0.30 - oy0 * sEnd;
+    pshadow.style.left = cx + "px"; pshadow.style.top = cy + "px"; pshadow.style.width = cw + "px"; pshadow.style.height = ch + "px";
+    G = { cw: cw, ch: ch, cx: cx, cy: cy, sEnd: sEnd, tx: tx, ty: ty };
+    lastK = -1;
+  }
+  pimg.addEventListener("load", measure);
+  if ("ResizeObserver" in window) new ResizeObserver(function () { measure(); }).observe(document.body);
+  function frame(now) {
+    var dt = Math.min(64, now - last); last = now;
+    if (!G) measure();
+    var y = window.scrollY;
+    var p = reduce ? 1 : clamp(y / total, 0, 1);
+    // ease the hero progress towards the scroll position so wheel steps feel smooth
+    if (ps < 0 || reduce) ps = p; else ps += (p - ps) * (1 - Math.exp(-dt / 70));
+    if (Math.abs(p - ps) < 0.0004) ps = p;
+    var inHero = y < total + vh;
+    var nk = smooth(ps, 0.18, 0.5);
+    if (!reduce && inHero && nk > 0) drift += dt * 0.018;
+
+    // read layout before any writes
+    var sr = null;
+    if (words.length) sr = document.getElementById("statementText").getBoundingClientRect();
+
+    // portrait: full bleed -> centred card (clip + transform only, no layout)
+    var k = smooth(ps, 0.04, 0.5);
+    if (inHero && Math.abs(k - lastK) > 0.00005) {
+      lastK = k;
+      var w = lerp(vw, G.cw, k), h = lerp(vh, G.ch, k);
+      var x = lerp(0, G.cx, k), top = lerp(0, G.cy, k);
+      var r = lerp(0, 22, k);
+      portrait.style.clipPath = "inset(" + top.toFixed(2) + "px " + (vw - x - w).toFixed(2) + "px " + (vh - top - h).toFixed(2) + "px " + x.toFixed(2) + "px round " + r.toFixed(2) + "px)";
+      var sc = lerp(1, G.sEnd, k);
+      pimg.style.transform = "translate3d(" + lerp(0, G.tx, k).toFixed(2) + "px," + lerp(0, G.ty, k).toFixed(2) + "px,0) scale(" + sc.toFixed(5) + ")";
+      pshadow.style.opacity = (k * k).toFixed(3);
+      pshadow.style.transform = "scale(" + (w / G.cw).toFixed(4) + "," + (h / G.ch).toFixed(4) + ")";
+      pshade.style.opacity = (1 - k * 0.8).toFixed(3);
+    }
+    var p = ps;
+    var cw = G.cw, ch = G.ch;
 
     // name rows behind the card
-    var nk = smooth(p, 0.18, 0.5);
     names.style.opacity = nk.toFixed(3);
     var shift = p * vw * 0.45;
     row1.style.transform = "translate3d(" + (-(drift % (vw * 2)) * 0.6 - shift) + "px,0,0)";
@@ -875,12 +911,10 @@
     heroCta.style.opacity = badge.style.opacity = (1 - ek).toFixed(3);
 
     // nav state, progress, statement words
-    var docH = document.documentElement.scrollHeight - vh;
-    bar.style.transform = "scaleX(" + (docH > 0 ? y / docH : 0) + ")";
+    bar.style.transform = "scaleX(" + clamp(y / docH, 0, 1) + ")";
     nav.classList.toggle("solid", y > total * 0.92);
     if (words.length) {
-      var r = document.getElementById("statementText").getBoundingClientRect();
-      var sp = clamp((vh * 0.85 - r.top) / (r.height + vh * 0.35), 0, 1);
+      var sp = clamp((vh * 0.85 - sr.top) / (sr.height + vh * 0.35), 0, 1);
       var lit = Math.round(sp * words.length);
       for (var i = 0; i < words.length; i++) words[i].classList.toggle("lit", reduce || i < lit);
     }
@@ -890,27 +924,34 @@
   /* ---------- floating green dots ---------- */
   var cv = document.getElementById("dots"), ctx = cv.getContext("2d"), dots = [];
   function resizeDots() {
-    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    var dpr = 1; // soft dots look the same at 1x and cost a quarter of the pixels
     cv.width = vw * dpr; cv.height = vh * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    var n = Math.round(vw * vh / 9000); dots = [];
+    var n = Math.min(160, Math.round(vw * vh / 11000)); dots = [];
     for (var i = 0; i < n; i++) dots.push({ x: Math.random() * vw, y: Math.random() * vh, r: 0.6 + Math.random() * 1.8, s: 0.1 + Math.random() * 0.35, a: 0.15 + Math.random() * 0.5, ph: Math.random() * 6.28 });
   }
   var mx = 0.5, my = 0.5;
   window.addEventListener("pointermove", function (e) { mx = e.clientX / vw; my = e.clientY / vh; }, { passive: true });
+  var BUCKETS = 8, lastDots = 0;
   function drawDots(now) {
+    requestAnimationFrame(drawDots);
+    if (window.scrollY > total + vh || document.hidden) return;
+    if (now - lastDots < 30) return; // ~30 fps is plenty for slow drifting dots
+    var step = Math.min(3, (now - lastDots) / 16.7); lastDots = now;
     ctx.clearRect(0, 0, vw, vh);
+    var paths = [];
+    for (var b = 0; b < BUCKETS; b++) paths.push(new Path2D());
     for (var i = 0; i < dots.length; i++) {
       var d = dots[i];
-      if (!reduce) { d.y -= d.s * 0.4; if (d.y < -4) { d.y = vh + 4; d.x = Math.random() * vw; } }
+      if (!reduce) { d.y -= d.s * 0.4 * step; if (d.y < -4) { d.y = vh + 4; d.x = Math.random() * vw; } }
       var ox = (mx - 0.5) * 18 * d.r, oy = (my - 0.5) * 12 * d.r;
-      var tw = 0.6 + 0.4 * Math.sin(now / 900 + d.ph);
-      ctx.beginPath(); ctx.arc(d.x + ox, d.y + oy, d.r, 0, 6.283);
-      ctx.fillStyle = "rgba(111,190,140," + (d.a * tw).toFixed(3) + ")"; ctx.fill();
+      var a = d.a * (0.6 + 0.4 * Math.sin(now / 900 + d.ph));
+      var bi = Math.min(BUCKETS - 1, Math.floor(a / 0.65 * BUCKETS));
+      paths[bi].moveTo(d.x + ox + d.r, d.y + oy); paths[bi].arc(d.x + ox, d.y + oy, d.r, 0, 6.283);
     }
-    requestAnimationFrame(drawDots);
+    for (var b2 = 0; b2 < BUCKETS; b2++) { ctx.fillStyle = "rgba(111,190,140," + ((b2 + 0.5) / BUCKETS * 0.65).toFixed(3) + ")"; ctx.fill(paths[b2]); }
   }
 
-  function onResize() { vw = innerWidth; vh = innerHeight; placeStickers(vw, vh); resizeDots(); }
+  function onResize() { vw = innerWidth; vh = innerHeight; placeStickers(vw, vh); resizeDots(); measure(); }
   window.addEventListener("resize", onResize);
 
   /* ---------- scroll spy ---------- */
