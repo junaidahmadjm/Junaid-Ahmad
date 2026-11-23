@@ -1,7 +1,6 @@
-# junaidahmad.tech
+# junaidahmad.dev
 
-Personal portfolio of Junaid Ahmad. Plain HTML/CSS/JS, no build step.
+Personal portfolio.
 
 - `index.html` – the whole site
-- `assets/` – photo and CV PDF (replace `Junaid_Ahmad_CV.pdf` to update the download)
 
