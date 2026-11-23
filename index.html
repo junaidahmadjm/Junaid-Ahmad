@@ -90,7 +90,7 @@
   .names .row span i { font-style: normal; color: var(--acc-ink); padding-left: .25em; }
   .names .row.two span { font-style: italic; }
   .portrait { position: absolute; inset: 0; z-index: 2; overflow: hidden; contain: strict; will-change: clip-path; }
-  .portrait img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; object-position: 44% 30%; transform-origin: 0 0; will-change: transform; backface-visibility: hidden; }
+  .portrait img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; max-width: none; object-fit: cover; object-position: 44% 30%; transform-origin: 0 0; will-change: transform; backface-visibility: hidden; }
   .pshadow { position: absolute; z-index: 2; border-radius: 22px; box-shadow: 0 40px 90px -40px rgba(0,0,0,.75); opacity: 0; pointer-events: none; will-change: transform, opacity; transform-origin: 50% 50%; }
   .portrait .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.28) 0%, transparent 22%, transparent 68%, rgba(0,0,0,.45) 100%); pointer-events: none; will-change: opacity; }
   .sig { position: absolute; z-index: 4; pointer-events: none; overflow: visible; }
@@ -841,9 +841,11 @@
     var f = Math.max(vw / iw, vh / ih), Fw = iw * f, Fh = ih * f;
     var ox0 = (vw - Fw) * 0.44, oy0 = (vh - Fh) * 0.30;
     var c = Math.max(cw / iw, ch / ih), sEnd = c / f;
-    var tx = cx + (cw - Fw * sEnd) * 0.44 - ox0 * sEnd, ty = cy + (ch - Fh * sEnd) * 0.30 - oy0 * sEnd;
+    // size the image element to its full-bleed cover size, so nothing is clipped when it is scaled down
+    pimg.style.width = Fw + "px"; pimg.style.height = Fh + "px"; pimg.style.objectFit = "fill";
+    var tx = cx + (cw - Fw * sEnd) * 0.44, ty = cy + (ch - Fh * sEnd) * 0.30;
     pshadow.style.left = cx + "px"; pshadow.style.top = cy + "px"; pshadow.style.width = cw + "px"; pshadow.style.height = ch + "px";
-    G = { cw: cw, ch: ch, cx: cx, cy: cy, sEnd: sEnd, tx: tx, ty: ty };
+    G = { cw: cw, ch: ch, cx: cx, cy: cy, sEnd: sEnd, tx: tx, ty: ty, ox: ox0, oy: oy0 };
     lastK = -1;
   }
   pimg.addEventListener("load", measure);
@@ -873,7 +875,7 @@
       var r = lerp(0, 22, k);
       portrait.style.clipPath = "inset(" + top.toFixed(2) + "px " + (vw - x - w).toFixed(2) + "px " + (vh - top - h).toFixed(2) + "px " + x.toFixed(2) + "px round " + r.toFixed(2) + "px)";
       var sc = lerp(1, G.sEnd, k);
-      pimg.style.transform = "translate3d(" + lerp(0, G.tx, k).toFixed(2) + "px," + lerp(0, G.ty, k).toFixed(2) + "px,0) scale(" + sc.toFixed(5) + ")";
+      pimg.style.transform = "translate3d(" + lerp(G.ox, G.tx, k).toFixed(2) + "px," + lerp(G.oy, G.ty, k).toFixed(2) + "px,0) scale(" + sc.toFixed(5) + ")";
       pshadow.style.opacity = (k * k).toFixed(3);
       pshadow.style.transform = "scale(" + (w / G.cw).toFixed(4) + "," + (h / G.ch).toFixed(4) + ")";
       pshade.style.opacity = (1 - k * 0.8).toFixed(3);
